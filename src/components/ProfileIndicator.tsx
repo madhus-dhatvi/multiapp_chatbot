@@ -7,7 +7,6 @@ import { storage } from '../utils/storage';
 import { authService } from '../api/authService';
 import { colors } from '../theme';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
-
 const UserAvatar = () => (
   <Svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
