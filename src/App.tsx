@@ -16,6 +16,7 @@ import LoginScreen from './features/auth/screens/LoginScreen';
 import { SupportHomeScreen } from './features/support/screens/SupportHomeScreen';
 import { CategoryQuestionsScreen } from './features/support/screens/CategoryQuestionsScreen';
 import { AnswerScreen } from './features/support/screens/AnswerScreen';
+import { ChatScreen } from './features/support/screens/ChatScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -88,6 +89,11 @@ const AppNavigator = () => {
                 name="Answer" 
                 component={AnswerScreen} 
                 options={({ route }) => ({ title: route.params.categoryTitle })}
+              />
+              <Stack.Screen 
+                name="ChatScreen" 
+                component={ChatScreen} 
+                options={{ title: 'Chat Support' }}
               />
             </>
           )}

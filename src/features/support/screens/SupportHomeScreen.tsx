@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, SafeAreaView } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
 import { useSelector } from 'react-redux';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
@@ -10,6 +10,9 @@ import { faqsData } from '../../../data/faqs';
 import { colors } from '../../../theme';
 import { ProfileIndicator } from '../../../components/ProfileIndicator';
 import { RootStackParamList } from '../../../navigation/types';
+import { RecentOrders } from '../components/RecentOrders';
+import { orderService } from '../../../api/orderService';
+import { RecentOrder } from '../../../types/order';
 
 type SupportHomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'SupportHome'>;
 
@@ -22,21 +25,58 @@ const ChevronRight = () => (
 export const SupportHomeScreen = () => {
   const navigation = useNavigation<SupportHomeScreenNavigationProp>();
   const user = useSelector((state: RootState) => state.auth.user);
+  const [creatingSession, setCreatingSession] = useState(false);
   
   const userRole = user?.role?.toUpperCase() || 'USER';
   const categories = faqsData[userRole] || [];
+
+  const handleOrderPress = async (order: RecentOrder) => {
+    if (creatingSession) return;
+    try {
+      setCreatingSession(true);
+      const session = await orderService.createSession({ orderId: order.orderId });
+      navigation.navigate('ChatScreen', { session, order });
+    } catch (error: any) {
+      Alert.alert(
+        'Session Error',
+        error?.message || 'Failed to start chat session. Please try again.',
+      );
+    } finally {
+      setCreatingSession(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       <ProfileIndicator />
       
-      <View style={styles.content}>
+      {/* Loading overlay while creating session */}
+      {creatingSession && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingCard}>
+            <ActivityIndicator size="small" color={colors.secondary} />
+            <Text style={styles.loadingText}>Starting chat...</Text>
+          </View>
+        </View>
+      )}
+
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}>
+
+        {/* Recent Orders Section — above FAQs */}
+        <RecentOrders onOrderPress={handleOrderPress} />
+
+        {/* Divider between sections */}
+        <View style={styles.sectionDivider} />
+
+        {/* FAQs Section */}
         <Text style={styles.sectionTitle}>FAQs</Text>
         
-        <FlatList
-          data={categories}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
+        {categories.map((item, index) => (
+          <React.Fragment key={item.id}>
+            {index > 0 && <View style={styles.separator} />}
             <TouchableOpacity 
               style={styles.categoryRow}
               onPress={() => navigation.navigate('CategoryQuestions', { category: item })}
@@ -44,11 +84,9 @@ export const SupportHomeScreen = () => {
               <Text style={styles.categoryTitle}>{item.title}</Text>
               <ChevronRight />
             </TouchableOpacity>
-          )}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          contentContainerStyle={styles.listContainer}
-        />
-      </View>
+          </React.Fragment>
+        ))}
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -61,6 +99,14 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  scrollContent: {
+    paddingBottom: 32,
+  },
+  sectionDivider: {
+    height: 6,
+    backgroundColor: colors.backgroundLight,
+    marginTop: 8,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -68,9 +114,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginTop: 8,
-  },
-  listContainer: {
-    paddingBottom: 20,
   },
   categoryRow: {
     flexDirection: 'row',
@@ -87,5 +130,35 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.border1,
     marginHorizontal: 16,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.overlay,
+    zIndex: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.cardBackground,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 12,
+    gap: 12,
+    shadowColor: colors.shadowColor,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  loadingText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.primary,
   },
 });
