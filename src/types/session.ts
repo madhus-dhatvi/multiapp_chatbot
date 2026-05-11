@@ -27,3 +27,23 @@ export interface SendMessageResponse {
   timestamp: string;
 }
 
+export interface ChatHistoryMessage {
+  id: string;
+  senderType: string;
+  message: string;
+  messageType: string;
+  intent: string;
+  sentAt: string;
+}
+
+export interface SingleChatHistoryResponse {
+  sessionId: string;
+  appId: string;
+  status: string;
+  resolutionType: string;
+  chatEnabled: boolean;
+  contextOrderId: string;
+  startedAt: string;
+  endedAt: string;
+  messages: ChatHistoryMessage[];
+}

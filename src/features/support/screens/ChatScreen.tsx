@@ -1,4 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
 import {
   View,
   Text,
@@ -11,25 +18,71 @@ import {
   SafeAreaView,
   ActivityIndicator,
 } from 'react-native';
+
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSelector } from 'react-redux';
 import Svg, { Path, Circle } from 'react-native-svg';
+
 import { colors } from '../../../theme';
 import { RootStackParamList } from '../../../navigation/types';
-import { orderService } from '../../../api/orderService';
 import { RootState } from '../../../store';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'ChatScreen'>;
+import { supportService } from '../../../api/supportService';
+
+type Props = NativeStackScreenProps<
+  RootStackParamList,
+  'ChatScreen'
+>;
+
+type ChatMode =
+  | 'GUIDED'
+  | 'FREE_CHAT'
+  | 'RESOLVED';
+
+type MessageType =
+  | 'TEXT'
+  | 'OPTIONS'
+  | 'RESOLUTION';
+
+type OptionAction =
+  | 'CATEGORY'
+  | 'QUESTION';
+
+interface ChatOption {
+  id: string;
+  label: string;
+  value: string;
+  action: OptionAction;
+  disabled?: boolean;
+}
 
 interface Message {
   id: string;
-  text: string;
-  sender: 'bot' | 'user';
-  timestamp: Date;
+  type: MessageType;
+  text?: string;
+  sender: 'bot' | 'user' | 'system';
+  timestamp: number;
   isError?: boolean;
+  options?: ChatOption[];
+  selectedOptionId?: string;
 }
 
-// ── SVG Icons ───────────────────────────────────────────────────────
+interface FAQCategory {
+  category: string;
+  displayName: string;
+  displayOrder: number;
+}
+
+interface FAQQuestion {
+  faqId: string;
+  question: string;
+  category: string;
+  intent: string;
+  displayOrder: number;
+}
+
+const RESPONSE_DELAY = 450;
+
 const SendIcon = () => (
   <Svg
     width="20"
@@ -79,139 +132,666 @@ const OrderInfoIcon = () => (
   </Svg>
 );
 
-// ── Typing Indicator ────────────────────────────────────────────────
 const TypingIndicator = () => (
   <View style={[msgStyles.row, msgStyles.botRow]}>
     <View style={msgStyles.avatar}>
       <BotIcon />
     </View>
-    <View style={[msgStyles.bubble, msgStyles.botBubble, msgStyles.typingBubble]}>
-      <ActivityIndicator size="small" color={colors.secondary} />
-      <Text style={msgStyles.typingText}>Typing...</Text>
+
+    <View
+      style={[
+        msgStyles.bubble,
+        msgStyles.botBubble,
+        msgStyles.typingBubble,
+      ]}>
+      <ActivityIndicator
+        size="small"
+        color={colors.secondary}
+      />
+
+      <Text style={msgStyles.typingText}>
+        Typing...
+      </Text>
     </View>
   </View>
 );
 
-// ── Chat Screen ─────────────────────────────────────────────────────
 export const ChatScreen = ({ route }: Props) => {
   const { session, order } = route.params;
-  const user = useSelector((state: RootState) => state.auth.user);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [isSending, setIsSending] = useState(false);
+
+  const user = useSelector(
+    (state: RootState) => state.auth.user,
+  );
+
   const flatListRef = useRef<FlatList>(null);
 
-  // Show welcome message on mount
-  useEffect(() => {
-    if (session.welcomeMessage) {
-      setMessages([
-        {
-          id: 'welcome',
-          text: session.welcomeMessage,
-          sender: 'bot',
-          timestamp: new Date(session.startedAt),
-        },
-      ]);
-    }
-  }, [session]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+
+  const [chatMode, setChatMode] =
+    useState<ChatMode>('GUIDED');
+
+  const questionCache = useRef<
+    Record<string, FAQQuestion[]>
+  >({});
 
   const scrollToBottom = () => {
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({
+        animated: true,
+      });
+    });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const wait = (ms: number) =>
+    new Promise(resolve => setTimeout(() => resolve(undefined), ms));
+
+  const appendMessage = useCallback(
+    (message: Message) => {
+      setMessages(prev => [...prev, message]);
+    },
+    [],
+  );
+
+  const disableLastOptions = (
+    selectedId: string,
+  ) => {
+    setMessages(prev =>
+      prev
+        .map(msg => {
+          if (
+            msg.type === 'OPTIONS'
+          ) {
+            const filteredOptions =
+              msg.options?.filter(
+                option =>
+                  option.id ===
+                  selectedId,
+              ) || [];
+
+            const isWelcomeMessage =
+              msg.text ===
+              session.welcomeMessage;
+
+            if (
+              filteredOptions.length === 0 &&
+              !isWelcomeMessage
+            ) {
+              return null;
+            }
+
+            return {
+              ...msg,
+              selectedOptionId:
+                selectedId,
+              options:
+                filteredOptions,
+            };
+          }
+
+          return msg;
+        })
+        .filter(Boolean) as Message[],
+    );
+  };
+
+  useEffect(() => {
+    initializeChat();
+  }, []);
+
+  const initializeChat = async () => {
+    if (!session?.welcomeMessage) {
+      return;
+    }
+
+    try {
+      setIsTyping(true);
+
+      const categories: FAQCategory[] =
+        await supportService.getFaqCategories();
+
+      await wait(RESPONSE_DELAY);
+
+      const sorted = [...categories].sort(
+        (a, b) =>
+          a.displayOrder - b.displayOrder,
+      );
+
+      appendMessage({
+        id: `welcome-${Date.now()}`,
+        type: 'OPTIONS',
+        text: session.welcomeMessage,
+        sender: 'bot',
+        timestamp: new Date(
+          session.startedAt,
+        ).getTime(),
+        options: sorted.map(
+          (category, index) => ({
+            id: `${category.category}-${Date.now()}-${index}`,
+            label: category.displayName,
+            value: category.category,
+            action: 'CATEGORY',
+          }),
+        ),
+      });
+    } catch {
+      appendMessage({
+        id: `cat-error-${Date.now()}`,
+        type: 'TEXT',
+        text: 'Failed to load support categories.',
+        sender: 'system',
+        timestamp: Date.now(),
+        isError: true,
+      });
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const loadCategories = async () => {
+    try {
+      setIsTyping(true);
+
+      const categories: FAQCategory[] =
+        await supportService.getFaqCategories();
+
+      await wait(RESPONSE_DELAY);
+
+      const sorted = [...categories].sort(
+        (a, b) =>
+          a.displayOrder - b.displayOrder,
+      );
+
+      appendMessage({
+        id: `categories-${Date.now()}`,
+        type: 'OPTIONS',
+        sender: 'bot',
+        timestamp: Date.now(),
+        text: 'Please select a help category',
+        options: sorted.map((category, index) => ({
+          id: `${category.category}-${Date.now()}-${index}`,
+          label: category.displayName,
+          value: category.category,
+          action: 'CATEGORY',
+        })),
+      });
+    } catch {
+      appendMessage({
+        id: `cat-error-${Date.now()}`,
+        type: 'TEXT',
+        text: 'Failed to load support categories.',
+        sender: 'system',
+        timestamp: Date.now(),
+        isError: true,
+      });
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleCategoryPress = async (
+    option: ChatOption,
+  ) => {
+    if (isSending) {
+      return;
+    }
+
+    try {
+      setIsSending(true);
+
+      disableLastOptions(option.id);
+
+      appendMessage({
+        id: `user-cat-${Date.now()}`,
+        type: 'TEXT',
+        text: option.label,
+        sender: 'user',
+        timestamp: Date.now(),
+      });
+
+      setIsTyping(true);
+
+      let questions =
+        questionCache.current[option.value];
+
+      if (!questions) {
+        questions =
+          await supportService.getFaqQuestions(
+            option.value,
+          );
+
+        questionCache.current[option.value] =
+          questions;
+      }
+
+      await wait(RESPONSE_DELAY);
+
+      appendMessage({
+        id: `questions-${Date.now()}`,
+        type: 'OPTIONS',
+        sender: 'bot',
+        timestamp: Date.now(),
+        options: questions.map((question, index) => ({
+          id: `${question.faqId}-${Date.now()}-${index}`,
+          label: question.question,
+          value: question.faqId,
+          action: 'QUESTION',
+        })),
+      });
+    } catch {
+      appendMessage({
+        id: `question-error-${Date.now()}`,
+        type: 'TEXT',
+        text: 'Failed to load support questions.',
+        sender: 'system',
+        timestamp: Date.now(),
+        isError: true,
+      });
+    } finally {
+      setIsTyping(false);
+      setIsSending(false);
+    }
+  };
+
+  const handleQuestionPress = async (
+    option: ChatOption,
+  ) => {
+    if (isSending) {
+      return;
+    }
+
+    try {
+      setIsSending(true);
+
+      disableLastOptions(option.value);
+
+      appendMessage({
+        id: `user-question-${Date.now()}`,
+        type: 'TEXT',
+        text: option.label,
+        sender: 'user',
+        timestamp: Date.now(),
+      });
+
+      setIsTyping(true);
+
+      const answer =
+        await supportService.getFaqAnswer(
+          option.value,
+          {
+            orderId: order.orderId,
+            sessionId: session.sessionId,
+          },
+        );
+
+      await wait(600);
+
+      appendMessage({
+        id: `answer-${Date.now()}`,
+        type: 'TEXT',
+        text: answer.answer,
+        sender: 'bot',
+        timestamp: Date.now(),
+      });
+
+      appendMessage({
+        id: `resolution-${Date.now()}`,
+        type: 'RESOLUTION',
+        sender: 'bot',
+        timestamp: Date.now(),
+      });
+    } catch {
+      appendMessage({
+        id: `answer-error-${Date.now()}`,
+        type: 'TEXT',
+        text: 'Failed to fetch answer.',
+        sender: 'system',
+        timestamp: Date.now(),
+        isError: true,
+      });
+    } finally {
+      setIsTyping(false);
+      setIsSending(false);
+    }
+  };
+
+  const handleResolution = async (
+    resolved: boolean,
+  ) => {
+    if (isSending) {
+      return;
+    }
+
+    try {
+      setIsSending(true);
+
+      appendMessage({
+        id: `resolution-user-${Date.now()}`,
+        type: 'TEXT',
+        text: resolved
+          ? 'Back to categories'
+          : 'Issue not resolved',
+        sender: 'user',
+        timestamp: Date.now(),
+      });
+
+      setIsTyping(true);
+
+      const response =
+        await supportService.resolveChat({
+          sessionId: session.sessionId,
+          resolved,
+        });
+
+      await wait(RESPONSE_DELAY);
+
+      appendMessage({
+        id: `resolution-response-${Date.now()}`,
+        type: 'TEXT',
+        text: response.message,
+        sender: 'system',
+        timestamp: Date.now(),
+      });
+
+      if (response.chatEnabled) {
+        setChatMode('FREE_CHAT');
+
+        appendMessage({
+          id: `free-chat-enabled-${Date.now()}`,
+          type: 'TEXT',
+          text: 'Live support enabled.',
+          sender: 'system',
+          timestamp: Date.now(),
+        });
+
+        return;
+      }
+
+      setChatMode('RESOLVED');
+
+      await wait(300);
+
+      await loadCategories();
+    } catch {
+      appendMessage({
+        id: `resolve-error-${Date.now()}`,
+        type: 'TEXT',
+        text: 'Failed to update resolution.',
+        sender: 'system',
+        timestamp: Date.now(),
+        isError: true,
+      });
+    } finally {
+      setIsTyping(false);
+      setIsSending(false);
+    }
   };
 
   const handleSend = async () => {
     const trimmed = inputText.trim();
-    if (!trimmed || isSending) return;
 
-    // Add user message to chat
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      text: trimmed,
-      sender: 'user',
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInputText('');
-    setIsSending(true);
-    scrollToBottom();
+    if (
+      !trimmed ||
+      isSending ||
+      chatMode !== 'FREE_CHAT'
+    ) {
+      return;
+    }
 
     try {
-      // Call the send message API
-      const response = await orderService.sendMessage({
-        sessionId: session.sessionId,
-        message: trimmed,
-        userId: user?.sub || '',
-        appId: session.appId,
+      setIsSending(true);
+
+      appendMessage({
+        id: `user-msg-${Date.now()}`,
+        type: 'TEXT',
+        text: trimmed,
+        sender: 'user',
+        timestamp: Date.now(),
       });
 
-      // Add bot reply to chat
-      const botMessage: Message = {
-        id: `bot-${Date.now()}`,
+      setInputText('');
+
+      setIsTyping(true);
+
+      const response =
+        await supportService.sendChatMessage({
+          sessionId: session.sessionId,
+          message: trimmed,
+          userId: user?.sub || '',
+          appId: session.appId,
+        });
+
+      await wait(350);
+
+      appendMessage({
+        id: `bot-msg-${Date.now()}`,
+        type: 'TEXT',
         text: response.reply,
         sender: 'bot',
-        timestamp: new Date(response.timestamp),
-      };
-
-      setMessages(prev => [...prev, botMessage]);
+        timestamp: Date.now(),
+      });
     } catch (error: any) {
-      // Show error as a bot message so the user sees it inline
-      const errorMessage: Message = {
-        id: `error-${Date.now()}`,
-        text: error?.message || 'Failed to send message. Please try again.',
-        sender: 'bot',
-        timestamp: new Date(),
+      appendMessage({
+        id: `chat-error-${Date.now()}`,
+        type: 'TEXT',
+        text:
+          error?.message ||
+          'Failed to send message.',
+        sender: 'system',
+        timestamp: Date.now(),
         isError: true,
-      };
-
-      setMessages(prev => [...prev, errorMessage]);
+      });
     } finally {
+      setIsTyping(false);
       setIsSending(false);
-      scrollToBottom();
     }
   };
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('en-IN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
+  const renderOptionButtons = (
+    message: Message,
+  ) => {
+    return (
+      <View style={styles.optionsContainer}>
+        {message.options?.map(option => {
+          const isSelected =
+            message.selectedOptionId === option.value;
+
+          return (
+            <TouchableOpacity
+              key={option.id}
+              activeOpacity={0.8}
+              disabled={option.disabled}
+              style={[
+                styles.optionButton,
+                option.disabled &&
+                  styles.optionButtonDisabled,
+                isSelected &&
+                  styles.optionButtonSelected,
+              ]}
+              onPress={() => {
+                if (
+                  option.action === 'CATEGORY'
+                ) {
+                  handleCategoryPress(option);
+                }
+
+                if (
+                  option.action === 'QUESTION'
+                ) {
+                  handleQuestionPress(option);
+                }
+              }}>
+              <Text
+                style={[
+                  styles.optionButtonText,
+                  isSelected &&
+                    styles.optionButtonTextSelected,
+                ]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isBot = item.sender === 'bot';
+  const renderResolutionActions = () => {
+    return (
+      <View style={styles.resolutionContainer}>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={[
+            styles.resolutionButton,
+            styles.resolvedButton,
+          ]}
+          disabled={isSending}
+          onPress={() =>
+            handleResolution(true)
+          }>
+          <Text style={styles.resolvedButtonText}>
+            Back to categories
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={[
+            styles.resolutionButton,
+            styles.notResolvedButton,
+          ]}
+          disabled={isSending}
+          onPress={() =>
+            handleResolution(false)
+          }>
+          <Text
+            style={
+              styles.notResolvedButtonText
+            }>
+            Issue not resolved
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const formatTime = (timestamp: number) => {
+    return new Date(timestamp).toLocaleTimeString(
+      'en-IN',
+      {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      },
+    );
+  };
+
+  const renderMessage = ({
+    item,
+  }: {
+    item: Message;
+  }) => {
+    if (item.type === 'OPTIONS') {
+      return (
+        <View
+          style={[
+            msgStyles.row,
+            msgStyles.botRow,
+          ]}>
+          <View style={msgStyles.avatar}>
+            <BotIcon />
+          </View>
+
+          <View
+            style={[
+              msgStyles.bubble,
+              msgStyles.botBubble,
+              styles.optionMessageBubble,
+            ]}>
+            {!!item.text && (
+              <Text
+                style={[
+                  msgStyles.text,
+                  msgStyles.botText,
+                  styles.optionMessageTitle,
+                ]}>
+                {item.text}
+              </Text>
+            )}
+
+            {renderOptionButtons(item)}
+
+            <Text
+              style={[
+                msgStyles.time,
+                msgStyles.botTime,
+              ]}>
+              {formatTime(item.timestamp)}
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (item.type === 'RESOLUTION') {
+      return renderResolutionActions();
+    }
+
+    const isBot =
+      item.sender === 'bot' ||
+      item.sender === 'system';
+
     return (
       <View
         style={[
           msgStyles.row,
-          isBot ? msgStyles.botRow : msgStyles.userRow,
+          isBot
+            ? msgStyles.botRow
+            : msgStyles.userRow,
         ]}>
         {isBot && (
           <View style={msgStyles.avatar}>
             <BotIcon />
           </View>
         )}
+
         <View
           style={[
             msgStyles.bubble,
-            isBot ? msgStyles.botBubble : msgStyles.userBubble,
-            item.isError && msgStyles.errorBubble,
+            isBot
+              ? msgStyles.botBubble
+              : msgStyles.userBubble,
+            item.isError &&
+            msgStyles.errorBubble,
+            item.sender === 'system' &&
+            msgStyles.systemBubble,
           ]}>
           <Text
             style={[
               msgStyles.text,
-              isBot ? msgStyles.botText : msgStyles.userText,
-              item.isError && msgStyles.errorText,
+              isBot
+                ? msgStyles.botText
+                : msgStyles.userText,
+              item.isError &&
+              msgStyles.errorText,
+              item.sender === 'system' &&
+              msgStyles.systemText,
             ]}>
             {item.text}
           </Text>
+
           <Text
             style={[
               msgStyles.time,
-              isBot ? msgStyles.botTime : msgStyles.userTime,
+              isBot
+                ? msgStyles.botTime
+                : msgStyles.userTime,
             ]}>
             {formatTime(item.timestamp)}
           </Text>
@@ -220,74 +800,127 @@ export const ChatScreen = ({ route }: Props) => {
     );
   };
 
+  const inputDisabled =
+    chatMode !== 'FREE_CHAT';
+
+  const inputPlaceholder = useMemo(() => {
+    if (chatMode === 'GUIDED') {
+      return 'Select an option above...';
+    }
+
+    if (chatMode === 'RESOLVED') {
+      return 'Support session resolved';
+    }
+
+    return 'Type a message...';
+  }, [chatMode]);
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* Order context banner */}
       <View style={styles.orderBanner}>
         <OrderInfoIcon />
+
         <View style={styles.orderBannerInfo}>
-          <Text style={styles.orderBannerTitle} numberOfLines={1}>
+          <Text
+            style={styles.orderBannerTitle}
+            numberOfLines={1}>
             {order.restaurantName || 'Order'}
           </Text>
-          <Text style={styles.orderBannerSubtitle} numberOfLines={1}>
-            {order.itemsSummary || `Order #${order.externalOrderId || order.orderId.slice(0, 8)}`}
+
+          <Text
+            style={styles.orderBannerSubtitle}
+            numberOfLines={1}>
+            {order.itemsSummary ||
+              `Order #${
+                order.externalOrderId ||
+                order.orderId.slice(0, 8)
+              }`}
           </Text>
         </View>
+
         <View style={styles.orderBannerStatus}>
-          <Text style={styles.orderBannerStatusText}>
-            {order.orderStatus?.replace(/_/g, ' ') || 'Active'}
+          <Text
+            style={
+              styles.orderBannerStatusText
+            }>
+            {order.orderStatus?.replace(
+              /_/g,
+              ' ',
+            ) || 'Active'}
           </Text>
         </View>
       </View>
 
-      {/* Messages */}
       <KeyboardAvoidingView
         style={styles.chatArea}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={
+          Platform.OS === 'ios'
+            ? 'padding'
+            : undefined
+        }
         keyboardVerticalOffset={90}>
         <FlatList
           ref={flatListRef}
           data={messages}
-          keyExtractor={item => item.id}
+          keyExtractor={(item, index) =>
+            `${item.id}-${index}`
+          }
           renderItem={renderMessage}
-          contentContainerStyle={styles.messagesList}
+          inverted={false}
+          contentContainerStyle={
+            styles.messagesList
+          }
           showsVerticalScrollIndicator={false}
-          ListFooterComponent={isSending ? <TypingIndicator /> : null}
-          ListEmptyComponent={
-            <View style={styles.emptyChat}>
-              <View style={styles.emptyChatIcon}>
-                <BotIcon />
-              </View>
-              <Text style={styles.emptyChatText}>
-                Start your conversation...
-              </Text>
-            </View>
+          ListFooterComponent={
+            isTyping ? (
+              <TypingIndicator />
+            ) : null
           }
         />
 
-        {/* Input bar */}
         <View style={styles.inputBar}>
           <TextInput
-            style={styles.textInput}
+            style={[
+              styles.textInput,
+              inputDisabled &&
+                styles.disabledInput,
+            ]}
             value={inputText}
             onChangeText={setInputText}
-            placeholder="Type a message..."
-            placeholderTextColor={colors.placeholderText}
+            placeholder={inputPlaceholder}
+            placeholderTextColor={
+              colors.placeholderText
+            }
             multiline
             maxLength={1000}
+            editable={!inputDisabled}
             onSubmitEditing={handleSend}
             blurOnSubmit={false}
-            editable={!isSending}
           />
+
           <TouchableOpacity
+            activeOpacity={0.8}
             style={[
               styles.sendButton,
-              (!inputText.trim() || isSending) && styles.sendButtonDisabled,
+              (!inputText.trim() ||
+                inputDisabled ||
+                isSending) &&
+                styles.sendButtonDisabled,
             ]}
             onPress={handleSend}
-            disabled={!inputText.trim() || isSending}>
-            {isSending ? (
-              <ActivityIndicator size="small" color={colors.cardBackground} />
+            disabled={
+              !inputText.trim() ||
+              inputDisabled ||
+              isSending
+            }>
+            {isSending &&
+            chatMode === 'FREE_CHAT' ? (
+              <ActivityIndicator
+                size="small"
+                color={
+                  colors.cardBackground
+                }
+              />
             ) : (
               <SendIcon />
             )}
@@ -298,12 +931,12 @@ export const ChatScreen = ({ route }: Props) => {
   );
 };
 
-//Styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundLight,
   },
+
   orderBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -314,58 +947,131 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border1,
     gap: 10,
   },
+
   orderBannerInfo: {
     flex: 1,
   },
+
   orderBannerTitle: {
     fontSize: 14,
     fontWeight: '700',
     color: colors.primary,
   },
+
   orderBannerSubtitle: {
     fontSize: 12,
     color: colors.gray500,
     marginTop: 2,
   },
+
   orderBannerStatus: {
     backgroundColor: colors.secondaryLight,
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
+
   orderBannerStatusText: {
     fontSize: 11,
     fontWeight: '600',
     color: colors.secondary,
     textTransform: 'capitalize',
   },
+
   chatArea: {
     flex: 1,
   },
+
   messagesList: {
     paddingHorizontal: 16,
     paddingVertical: 16,
     flexGrow: 1,
   },
-  emptyChat: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 60,
+
+  optionsContainer: {
+    gap: 8,
+    marginTop: 12,
   },
-  emptyChatIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.secondaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
+
+  optionMessageBubble: {
+    width: '88%',
+    paddingVertical: 12,
   },
-  emptyChatText: {
+
+  optionMessageTitle: {
     fontSize: 14,
-    color: colors.gray500,
+    fontWeight: '600',
+    marginBottom: 10,
   },
+
+  optionButton: {
+    width: '100%',
+    backgroundColor: colors.backgroundLight,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.border1,
+  },
+
+  optionButtonDisabled: {
+    opacity: 0,
+    height: 0,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    borderWidth: 0,
+    marginVertical: -4,
+  },
+
+  optionButtonSelected: {
+    backgroundColor: colors.secondaryLight,
+    borderColor: colors.secondary,
+  },
+
+  optionButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.primary,
+  },
+
+  optionButtonTextSelected: {
+    color: colors.secondary,
+    fontWeight: '700',
+  },
+
+  resolutionContainer: {
+    marginVertical: 10,
+    gap: 10,
+  },
+
+  resolutionButton: {
+    width: '100%',
+    borderRadius: 14,
+    paddingVertical: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  resolvedButton: {
+    backgroundColor: colors.secondaryLight,
+  },
+
+  notResolvedButton: {
+    backgroundColor: colors.notAvailableBg,
+  },
+
+  resolvedButtonText: {
+    color: colors.secondary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  notResolvedButtonText: {
+    color: colors.notAvailableText,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -376,16 +1082,25 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border1,
     gap: 8,
   },
+
   textInput: {
     flex: 1,
     backgroundColor: colors.inputFill,
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    paddingVertical:
+      Platform.OS === 'ios'
+        ? 10
+        : 8,
     fontSize: 15,
     color: colors.primary,
     maxHeight: 100,
   },
+
+  disabledInput: {
+    opacity: 0.7,
+  },
+
   sendButton: {
     width: 40,
     height: 40,
@@ -394,8 +1109,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+
   sendButtonDisabled: {
-    backgroundColor: colors.disabledButtonColor,
+    backgroundColor:
+      colors.disabledButtonColor,
   },
 });
 
@@ -404,12 +1121,15 @@ const msgStyles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 12,
   },
+
   botRow: {
     justifyContent: 'flex-start',
   },
+
   userRow: {
     justifyContent: 'flex-end',
   },
+
   avatar: {
     width: 32,
     height: 32,
@@ -420,62 +1140,92 @@ const msgStyles = StyleSheet.create({
     marginRight: 8,
     marginTop: 4,
   },
+
   bubble: {
     maxWidth: '75%',
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
+
   botBubble: {
     backgroundColor: colors.cardBackground,
     borderTopLeftRadius: 4,
+
     shadowColor: colors.shadowColor,
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
     shadowOpacity: 0.06,
     shadowRadius: 4,
     elevation: 1,
   },
+
   userBubble: {
     backgroundColor: colors.secondary,
     borderTopRightRadius: 4,
   },
+
+  systemBubble: {
+    backgroundColor:
+      colors.secondaryLight,
+  },
+
   text: {
     fontSize: 15,
     lineHeight: 21,
   },
+
   botText: {
     color: colors.primary,
   },
+
   userText: {
     color: '#FFFFFF',
   },
+
+  systemText: {
+    color: colors.secondary,
+  },
+
   time: {
     fontSize: 10,
     marginTop: 4,
     alignSelf: 'flex-end',
   },
+
   botTime: {
     color: colors.gray500,
   },
+
   userTime: {
     color: 'rgba(255,255,255,0.7)',
   },
+
   typingBubble: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingVertical: 12,
   },
+
   typingText: {
     fontSize: 13,
     color: colors.gray500,
     fontStyle: 'italic',
   },
+
   errorBubble: {
-    backgroundColor: colors.notAvailableBg,
-    borderColor: colors.notAvailableIndicator,
+    backgroundColor:
+      colors.notAvailableBg,
+
+    borderColor:
+      colors.notAvailableIndicator,
+
     borderWidth: 1,
   },
+
   errorText: {
     color: colors.notAvailableText,
   },
