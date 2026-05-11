@@ -102,14 +102,14 @@ export const supportService = {
   },
 
     async getChatHistory(
-  sessionId: string,
-): Promise<SingleChatHistoryResponse> {
-  const response = await client.get(
-    `/api/chat/history/${sessionId}`,
-  );
+        sessionId: string,
+    ): Promise<SingleChatHistoryResponse> {
+        const response = await client.get(
+            `/api/chat/history/${sessionId}`,
+        );
 
-  return response.data;
-},
+        return response.data;
+    },
 
   async endChatSession(sessionId: string) {
     const response = await client.post<ResolveChatResponse>(
