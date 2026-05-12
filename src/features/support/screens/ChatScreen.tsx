@@ -451,6 +451,7 @@ export const ChatScreen = ({ route }: Props) => {
 
   const handleResolution = async (
     resolved: boolean,
+    messageId: string,
   ) => {
     if (isSending) {
       return;
@@ -458,6 +459,17 @@ export const ChatScreen = ({ route }: Props) => {
 
     try {
       setIsSending(true);
+
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                selectedOptionId: resolved ? 'yes' : 'no',
+              }
+            : msg,
+        ),
+      );
 
       appendMessage({
         id: `resolution-user-${Date.now()}`,
@@ -588,13 +600,16 @@ export const ChatScreen = ({ route }: Props) => {
       <View style={styles.optionsContainer}>
         {message.options?.map(option => {
           const isSelected =
-            message.selectedOptionId === option.value;
+            message.selectedOptionId === option.id;
 
           return (
             <TouchableOpacity
               key={option.id}
               activeOpacity={0.8}
-              disabled={option.disabled}
+              disabled={
+                option.disabled ||
+                !!message.selectedOptionId
+              }
               style={[
                 styles.optionButton,
                 option.disabled &&
@@ -630,41 +645,58 @@ export const ChatScreen = ({ route }: Props) => {
     );
   };
 
-  const renderResolutionActions = () => {
+  const renderResolutionActions = (
+    message: Message,
+  ) => {
+    const isResponded = !!message.selectedOptionId;
+    const isResolved =
+      message.selectedOptionId === 'yes';
+    const isUnresolved =
+      message.selectedOptionId === 'no';
+
     return (
       <View style={styles.resolutionContainer}>
-        <TouchableOpacity
-          activeOpacity={0.8}
-          style={[
-            styles.resolutionButton,
-            styles.resolvedButton,
-          ]}
-          disabled={isSending}
-          onPress={() =>
-            handleResolution(true)
-          }>
-          <Text style={styles.resolvedButtonText}>
-            Back to categories
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          activeOpacity={0.8}
-          style={[
-            styles.resolutionButton,
-            styles.notResolvedButton,
-          ]}
-          disabled={isSending}
-          onPress={() =>
-            handleResolution(false)
-          }>
-          <Text
-            style={
-              styles.notResolvedButtonText
+        {(!isResponded || isResolved) && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={[
+              styles.resolutionButton,
+              styles.resolvedButton,
+              isResponded &&
+                styles.resolutionButtonDisabled,
+            ]}
+            disabled={isSending || isResponded}
+            onPress={() =>
+              handleResolution(true, message.id)
             }>
-            Issue not resolved
-          </Text>
-        </TouchableOpacity>
+            <Text
+              style={styles.resolvedButtonText}>
+              Back to categories
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {(!isResponded || isUnresolved) && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={[
+              styles.resolutionButton,
+              styles.notResolvedButton,
+              isResponded &&
+                styles.resolutionButtonDisabled,
+            ]}
+            disabled={isSending || isResponded}
+            onPress={() =>
+              handleResolution(false, message.id)
+            }>
+            <Text
+              style={
+                styles.notResolvedButtonText
+              }>
+              Issue not resolved
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
@@ -728,7 +760,7 @@ export const ChatScreen = ({ route }: Props) => {
     }
 
     if (item.type === 'RESOLUTION') {
-      return renderResolutionActions();
+      return renderResolutionActions(item);
     }
 
     const isBot =
@@ -1046,6 +1078,10 @@ const styles = StyleSheet.create({
 
   notResolvedButton: {
     backgroundColor: colors.notAvailableBg,
+  },
+
+  resolutionButtonDisabled: {
+    opacity: 0.7,
   },
 
   resolvedButtonText: {
