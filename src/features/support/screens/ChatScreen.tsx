@@ -170,8 +170,7 @@ export const ChatScreen = ({ route }: Props) => {
   const [isTyping, setIsTyping] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
-  const [chatMode, setChatMode] =
-    useState<ChatMode>('GUIDED');
+  const [chatMode, setChatMode] = useState<ChatMode>('GUIDED');
 
   const questionCache = useRef<
     Record<string, FAQQuestion[]>
@@ -199,45 +198,32 @@ export const ChatScreen = ({ route }: Props) => {
     [],
   );
 
-  const disableLastOptions = (
+  const collapseOptions = (
     selectedId: string,
   ) => {
     setMessages(prev =>
-      prev
-        .map(msg => {
-          if (
-            msg.type === 'OPTIONS'
-          ) {
-            const filteredOptions =
-              msg.options?.filter(
-                option =>
-                  option.id ===
-                  selectedId,
-              ) || [];
-
-            const isWelcomeMessage =
-              msg.text ===
-              session.welcomeMessage;
-
-            if (
-              filteredOptions.length === 0 &&
-              !isWelcomeMessage
-            ) {
-              return null;
-            }
-
-            return {
-              ...msg,
-              selectedOptionId:
-                selectedId,
-              options:
-                filteredOptions,
-            };
-          }
-
+      prev.map(msg => {
+        if (msg.type !== 'OPTIONS') {
           return msg;
-        })
-        .filter(Boolean) as Message[],
+        }
+
+        const hasSelected =
+          msg.options?.some(
+            o => o.id === selectedId,
+          ) ?? false;
+
+        if (!hasSelected) {
+          return msg;
+        }
+
+        return {
+          ...msg,
+          selectedOptionId: selectedId,
+          options: msg.options?.filter(
+            o => o.id === selectedId,
+          ) || [],
+        };
+      }),
     );
   };
 
@@ -257,6 +243,7 @@ export const ChatScreen = ({ route }: Props) => {
         await supportService.getFaqCategories();
 
       await wait(RESPONSE_DELAY);
+      console.log(categories);
 
       const sorted = [...categories].sort(
         (a, b) =>
@@ -266,7 +253,7 @@ export const ChatScreen = ({ route }: Props) => {
       appendMessage({
         id: `welcome-${Date.now()}`,
         type: 'OPTIONS',
-        text: session.welcomeMessage,
+        text: 'Which concern may i help you with?',
         sender: 'bot',
         timestamp: new Date(
           session.startedAt,
@@ -313,7 +300,7 @@ export const ChatScreen = ({ route }: Props) => {
         type: 'OPTIONS',
         sender: 'bot',
         timestamp: Date.now(),
-        text: 'Please select a help category',
+        text: 'Which concern may i help you with?',
         options: sorted.map((category, index) => ({
           id: `${category.category}-${Date.now()}-${index}`,
           label: category.displayName,
@@ -345,7 +332,7 @@ export const ChatScreen = ({ route }: Props) => {
     try {
       setIsSending(true);
 
-      disableLastOptions(option.id);
+      collapseOptions(option.id);
 
       appendMessage({
         id: `user-cat-${Date.now()}`,
@@ -375,6 +362,7 @@ export const ChatScreen = ({ route }: Props) => {
       appendMessage({
         id: `questions-${Date.now()}`,
         type: 'OPTIONS',
+        text: 'Which concern may i help you with?',
         sender: 'bot',
         timestamp: Date.now(),
         options: questions.map((question, index) => ({
@@ -409,7 +397,7 @@ export const ChatScreen = ({ route }: Props) => {
     try {
       setIsSending(true);
 
-      disableLastOptions(option.value);
+      collapseOptions(option.id);
 
       appendMessage({
         id: `user-question-${Date.now()}`,

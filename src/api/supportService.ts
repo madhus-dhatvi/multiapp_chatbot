@@ -40,14 +40,14 @@ export interface SendChatMessageResponse {
 }
 
 export const supportService = {
-  async startChatSession(payload: StartChatPayload) {
-    const response = await client.post<StartChatResponse>(
-      '/api/chat/start',
-      payload,
-    );
-
-    return response.data;
-  },
+  // async startChatSession(payload: StartChatPayload) {
+  //   const response = await client.post<StartChatResponse>(
+  //     '/api/chat/start',
+  //     payload,
+  //   );
+  //   console.log("session created by karthik",response.data);
+  //   return response.data;
+  // },
 
   async getFaqCategories() {
     const response = await client.get<FaqCategory[]>('/api/faq/categories');

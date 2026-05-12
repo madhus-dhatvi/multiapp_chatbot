@@ -15,7 +15,7 @@ export interface RoleFAQs {
 }
 
 export const faqsData: RoleFAQs = {
-  USER: [
+  RIDER: [
     {
       id: 'c1',
       title: 'General Inquiry',
@@ -73,7 +73,7 @@ export const faqsData: RoleFAQs = {
       questions: [],
     },
   ],
-  RIDER : [
+  USER : [
   {
     id: 'c1',
     title: 'Order Tracking & Delivery',
