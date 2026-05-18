@@ -2,7 +2,7 @@ import axios from 'axios';
 import { storage } from '../utils/storage';
 
 const apiClient = axios.create({
-  baseURL: 'https://apigatway-4j3s.onrender.com',
+  baseURL: 'https://chatbot-service-eb2k.onrender.com',
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',

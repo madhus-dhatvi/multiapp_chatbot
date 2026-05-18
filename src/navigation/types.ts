@@ -4,6 +4,7 @@ import { RecentOrder } from '../types/order';
 
 export type RootStackParamList = {
   Login: undefined;
+  OtpVerification: { phone: string };
   SupportHome: undefined;
   CategoryQuestions: { category: FAQCategory };
   Answer: { categoryTitle: string; question: Question };

@@ -11,50 +11,40 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useNavigation } from '@react-navigation/native';
 import { colors } from '../../../theme';
 import { authService } from '../../../api/authService';
-import { storage } from '../../../utils/storage';
 import ZestBotLogo from '../components/ZestBotLogo';
-import { jwtDecode } from 'jwt-decode';
-import { EyeIcon, EyeOffIcon } from '../components/PasswordIcons';
-import { useDispatch } from 'react-redux';
-import { setCredentials } from '../../../store/slices/authSlice';
+import { RootStackParamList } from '../../../navigation/types';
+
+type LoginNavProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
 
 const LoginScreen = () => {
-  const dispatch = useDispatch();
+  const navigation = useNavigation<LoginNavProp>();
   const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
-    if (!phone || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+  const handleSendOtp = async () => {
+    if (!phone.trim()) {
+      Alert.alert('Error', 'Please enter your phone number');
+      return;
+    }
+
+    // Validate: exactly 10 digits
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(phone.trim())) {
+      Alert.alert('Error', 'Please enter a valid 10-digit phone number');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await authService.login({ phone, password });
-      console.log('Login Response:', response);
-
-      if (response?.token) {
-        try {
-          const decoded: any = jwtDecode(response.token);
-          console.log('Decoded Token Payload:', decoded);
-          dispatch(setCredentials({ token: response.token, user: decoded }));
-        } catch (decodeError) {
-          console.error('Error decoding JWT token:', decodeError);
-          // If we can't decode, we shouldn't consider it a full login since we need the user role.
-          Alert.alert('Login Error', 'Invalid token format received.');
-          return;
-        }
-        await storage.saveToken(response.token);
-      }
-
-      Alert.alert('Success', response.message);
+      const response = await authService.sendOtp(phone.trim());
+      // Navigate to OTP screen, passing the phone number
+      navigation.navigate('OtpVerification', { phone: phone.trim() });
     } catch (error: any) {
-      Alert.alert('Login Failed', error.message);
+      Alert.alert('Failed to Send OTP', error.message);
     } finally {
       setLoading(false);
     }
@@ -65,13 +55,16 @@ const LoginScreen = () => {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.header}>
           <View style={styles.logoContainer}>
             <ZestBotLogo fill={colors.secondary} width={100} height={85} />
           </View>
-          <Text style={styles.title}>Login</Text>
-          <Text style={styles.subtitle}>Enter your credentials to continue</Text>
+          <Text style={styles.title}>Welcome</Text>
+          <Text style={styles.subtitle}>Enter your phone number to get started</Text>
         </View>
 
         <View style={styles.form}>
@@ -85,43 +78,21 @@ const LoginScreen = () => {
               value={phone}
               onChangeText={setPhone}
               autoCapitalize="none"
+              maxLength={10}
+              returnKeyType="done"
+              onSubmitEditing={handleSendOtp}
             />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Password</Text>
-            <View style={styles.passwordWrapper}>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="••••••••"
-                placeholderTextColor={colors.placeHolder}
-                secureTextEntry={!showPassword}
-                value={password}
-                onChangeText={setPassword}
-              />
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowPassword(!showPassword)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                {showPassword ? (
-                  <EyeOffIcon color={colors.subHeading} size={22} />
-                ) : (
-                  <EyeIcon color={colors.subHeading} size={22} />
-                )}
-              </TouchableOpacity>
-            </View>
           </View>
 
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
+            onPress={handleSendOtp}
             disabled={loading}
           >
             {loading ? (
               <ActivityIndicator color={colors.background} />
             ) : (
-              <Text style={styles.buttonText}>Log In</Text>
+              <Text style={styles.buttonText}>Send OTP</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -181,25 +152,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
     borderWidth: 1,
     borderColor: colors.border1,
-  },
-  passwordWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.inputFill,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border1,
-  },
-  passwordInput: {
-    flex: 1,
-    padding: 16,
-    fontSize: 16,
-    color: colors.primary,
-  },
-  eyeButton: {
-    paddingRight: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   button: {
     backgroundColor: colors.secondary,

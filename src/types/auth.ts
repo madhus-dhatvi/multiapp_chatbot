@@ -1,6 +1,6 @@
-export interface LoginRequest {
+export interface VerifyOtpRequest {
   phone: string;
-  password: string;
+  otp: string;
 }
 
 export interface LoginResponse {

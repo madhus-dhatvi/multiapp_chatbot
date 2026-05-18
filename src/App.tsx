@@ -13,6 +13,7 @@ import { colors } from './theme';
 import { RootStackParamList } from './navigation/types';
 
 import LoginScreen from './features/auth/screens/LoginScreen';
+import OtpVerificationScreen from './features/auth/screens/OtpVerificationScreen';
 import { SupportHomeScreen } from './features/support/screens/SupportHomeScreen';
 import { CategoryQuestionsScreen } from './features/support/screens/CategoryQuestionsScreen';
 import { AnswerScreen } from './features/support/screens/AnswerScreen';
@@ -68,11 +69,18 @@ const AppNavigator = () => {
           }}
         >
           {!isAuthenticated ? (
-            <Stack.Screen 
-              name="Login" 
-              component={LoginScreen} 
-              options={{ headerShown: false }} 
-            />
+            <>
+              <Stack.Screen
+                name="Login"
+                component={LoginScreen}
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen
+                name="OtpVerification"
+                component={OtpVerificationScreen}
+                options={{ headerShown: false }}
+              />
+            </>
           ) : (
             <>
               <Stack.Screen 
