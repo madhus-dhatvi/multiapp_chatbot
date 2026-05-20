@@ -8,8 +8,6 @@ import {
 
 import { sortByDisplayOrder } from '../utils/chatHelpers';
 
-import client from '../api/client';
-
 export const chatFlowService = {
   async loadCategories(): Promise<FaqCategory[]> {
     const categories =
@@ -29,13 +27,9 @@ export const chatFlowService = {
 
   async loadAnswer(
     faqId: string,
-    orderId: string,
     sessionId: string,
   ): Promise<FaqAnswer> {
-    return supportService.getFaqAnswer(faqId, {
-      orderId,
-      sessionId,
-    });
+    return supportService.getFaqAnswer(faqId, sessionId);
   },
 
   async resolveIssue(
@@ -62,20 +56,12 @@ export const chatFlowService = {
   },
 
   getChatHistory: async () => {
-    const response = await client.get(
-      '/api/chat/history',
-    );
-
-    return response.data;
+    return supportService.getAllChatHistory();
   },
 
   endChatSession: async (
     sessionId: string,
   ) => {
-    const response = await client.post(
-      `/api/chat/end/${sessionId}`,
-    );
-
-    return response.data;
+    return supportService.endChatSession(sessionId);
   },
 };

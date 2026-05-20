@@ -353,6 +353,12 @@ export const ChatScreen = ({ route }: Props) => {
             option.value,
           );
 
+        console.log(
+          '[FAQ questions response]',
+          option.value,
+          JSON.stringify(questions),
+        );
+
         questionCache.current[option.value] =
           questions;
       }
@@ -372,11 +378,11 @@ export const ChatScreen = ({ route }: Props) => {
           action: 'QUESTION',
         })),
       });
-    } catch {
+    } catch (error: any) {
       appendMessage({
         id: `question-error-${Date.now()}`,
         type: 'TEXT',
-        text: 'Failed to load support questions.',
+        text: error?.message || 'Failed to load support questions.',
         sender: 'system',
         timestamp: Date.now(),
         isError: true,
@@ -412,11 +418,17 @@ export const ChatScreen = ({ route }: Props) => {
       const answer =
         await supportService.getFaqAnswer(
           option.value,
-          {
-            orderId: order.orderId,
-            sessionId: session.sessionId,
-          },
+          session.sessionId,
         );
+
+      console.log(
+        '[FAQ answer response]',
+        option.value,
+        'sessionId=',
+        session.sessionId,
+        'answer=',
+        JSON.stringify(answer),
+      );
 
       await wait(600);
 
@@ -434,11 +446,11 @@ export const ChatScreen = ({ route }: Props) => {
         sender: 'bot',
         timestamp: Date.now(),
       });
-    } catch {
+    } catch (error: any) {
       appendMessage({
         id: `answer-error-${Date.now()}`,
         type: 'TEXT',
-        text: 'Failed to fetch answer.',
+        text: error?.message || 'Failed to fetch answer.',
         sender: 'system',
         timestamp: Date.now(),
         isError: true,

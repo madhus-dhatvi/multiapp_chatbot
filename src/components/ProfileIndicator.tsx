@@ -4,7 +4,6 @@ import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../store';
 import { logout } from '../store/slices/authSlice';
 import { storage } from '../utils/storage';
-import { authService } from '../api/authService';
 import { colors } from '../theme';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 const UserAvatar = () => (
@@ -34,15 +33,8 @@ export const ProfileIndicator = () => {
   const user = useSelector((state: RootState) => state.auth.user);
 
   const handleLogout = async () => {
-    try {
-      const data=await authService.logout();
-      console.log("logout successfully",data);
-    } catch (error) {
-      console.log('Logout API error:', error);
-    } finally {
-      await storage.removeToken();
-      dispatch(logout());
-    }
+    await storage.removeToken();
+    dispatch(logout());
   };
 
   const getAvatar = () => {

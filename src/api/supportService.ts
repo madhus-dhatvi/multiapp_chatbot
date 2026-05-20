@@ -126,7 +126,7 @@ export const supportService = {
 
       const response =
         await client.post<StartChatResponse>(
-          '/api/chat/start',
+          '/rider/api/chat/start',
           payload,
         );
 
@@ -153,7 +153,7 @@ export const supportService = {
     try {
       const response =
         await client.get<FaqCategory[]>(
-          '/api/faq/categories',
+          '/rider/api/faq/categories',
         );
 
       if (!Array.isArray(response.data)) {
@@ -182,13 +182,31 @@ export const supportService = {
       validateCategory(category);
 
       const response =
-        await client.get<FaqQuestion[]>(
-          `/api/faq/questions/${encodeURIComponent(
+        await client.get<FaqQuestion[] | string | { message?: string }>(
+          `/rider/api/faq/questions/${encodeURIComponent(
             category,
           )}`,
         );
 
+      console.log(
+        '[getFaqQuestions raw]',
+        category,
+        'status=',
+        response.status,
+        'data=',
+        JSON.stringify(response.data),
+      );
+
+      if (typeof response.data === 'string') {
+        throw new Error(response.data);
+      }
+
       if (!Array.isArray(response.data)) {
+        const msg =
+          (response.data as { message?: string })?.message;
+        if (msg) {
+          throw new Error(msg);
+        }
         return [];
       }
 
@@ -209,31 +227,40 @@ export const supportService = {
 
   async getFaqAnswer(
     faqId: string,
-    params: {
-      orderId?: string;
-      sessionId?: string;
-    },
+    sessionId: string,
   ): Promise<FaqAnswer> {
     try {
       validateFaqId(faqId);
+      validateSessionId(sessionId);
 
       const response =
-        await client.get<FaqAnswer>(
-          `/api/faq/answer/${encodeURIComponent(
-            faqId,
-          )}`,
-          {
-            params,
-          },
+        await client.get<FaqAnswer | string | { message?: string }>(
+          `/rider/api/faq/answer/${encodeURIComponent(faqId)}`,
+          { params: { sessionId } },
         );
 
-      if (!response?.data?.answer) {
-        throw new Error(
-          'Answer not available.',
-        );
+      console.log(
+        '[getFaqAnswer raw]',
+        faqId,
+        'status=',
+        response.status,
+        'data=',
+        JSON.stringify(response.data),
+      );
+
+      if (typeof response.data === 'string') {
+        throw new Error(response.data);
       }
 
-      return response.data;
+      const answer = response.data as FaqAnswer;
+
+      if (!answer?.answer) {
+        const msg =
+          (response.data as { message?: string })?.message;
+        throw new Error(msg || 'Answer not available.');
+      }
+
+      return answer;
     } catch (error) {
       throw new Error(
         getErrorMessage(
@@ -264,7 +291,7 @@ export const supportService = {
 
       const response =
         await client.post<ResolveChatResponse>(
-          '/api/chat/resolve',
+          '/rider/api/chat/resolve',
           payload,
         );
 
@@ -307,7 +334,7 @@ export const supportService = {
 
       const response =
         await client.post<SendChatMessageResponse>(
-          '/api/chat/message',
+          '/rider/api/chat/message',
           {
             ...payload,
             message:
@@ -340,7 +367,7 @@ export const supportService = {
 
       const response =
         await client.get<SingleChatHistoryResponse>(
-          `/api/chat/history/${encodeURIComponent(
+          `/rider/api/chat/history/session/${encodeURIComponent(
             sessionId,
           )}`,
         );
@@ -377,7 +404,7 @@ export const supportService = {
 
       const response =
         await client.post<ResolveChatResponse>(
-          `/api/chat/end/${encodeURIComponent(
+          `/rider/api/chat/end/${encodeURIComponent(
             sessionId,
           )}`,
         );
@@ -398,4 +425,25 @@ export const supportService = {
       );
     }
   },
-};
+
+  async getAllChatHistory(): Promise<SingleChatHistoryResponse[]> {
+    try {
+      const response = await client.get<SingleChatHistoryResponse[]>('/rider/api/chat/history');
+      return response.data;
+    } catch (error) {
+      throw new Error(getErrorMessage(error, 'Failed to load all chat history.'));
+    }
+  },
+
+  async getChatHistoryByOrder(orderId: string): Promise<SingleChatHistoryResponse[]> {
+    try {
+      if (!orderId?.trim()) {
+        throw new Error('Invalid order id.');
+      }
+      const response = await client.get<SingleChatHistoryResponse[]>(`/rider/api/chat/history/order/${encodeURIComponent(orderId)}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(getErrorMessage(error, 'Failed to load order chat history.'));
+    }
+  },
+};
